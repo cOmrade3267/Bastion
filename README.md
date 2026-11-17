@@ -1,4 +1,4 @@
-# Bastion__
+# Bastion
 
 Real-time DDoS detection and mitigation using Random Forest, with a live
 dashboard for monitoring flagged traffic.
