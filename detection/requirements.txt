@@ -6,5 +6,6 @@ requests==2.32.3
 # Capture (monitor VM only; needs root to sniff)
 scapy==2.6.1
 
-# Model training lands in Week 4 (#10); uncomment then:
-# scikit-learn==1.5.2
+# Model training (#10)
+scikit-learn==1.5.2
+joblib==1.4.2

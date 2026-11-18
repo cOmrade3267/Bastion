@@ -12,6 +12,9 @@ env/
 dashboard/data/*.csv
 detection/**/*.csv
 
+# Trained model artifacts (regenerate with detection/models/train_rf.py)
+*.joblib
+
 # Notebooks checkpoints
 .ipynb_checkpoints/
 
