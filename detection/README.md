@@ -30,13 +30,25 @@ python features/extract.py     # synthetic feature table
 python models/classify.py      # placeholder predictions vs. ground truth
 ```
 
+## Test without the lab
+
+`capture/synth_pcap.py` crafts a small labeled pcap (one source per class) so
+the real extractor can be exercised now:
+
+```bash
+python capture/synth_pcap.py --out /tmp/bastion_synth.pcap
+python pipeline.py --source pcap --path /tmp/bastion_synth.pcap --dry-run
+```
+
 ## Status (Week 2)
 
 - ✅ Feature schema (`FEATURE_COLUMNS`), synthetic generator, placeholder
   classifier, emitter, end-to-end pipeline — all runnable.
-- 🔸 Real capture (`capture/`) and pcap feature extraction are stubs with
-  final interfaces — they fill in once the VM lab is up (#1) and SYN-flood
-  traffic is generated/captured (#4).
+- ✅ **Real pcap feature extraction** (`extract_from_pcap`) — groups packets by
+  source IP and computes `FEATURE_COLUMNS` from live captures; verified on a
+  synthetic pcap (all four classes extracted + classified correctly).
+- 🔸 Live packet capture (`capture/capture.py`, Scapy sniff) is still a stub —
+  it needs the monitor VM + root (#1). `synth_pcap.py` covers dev meanwhile.
 - 🔸 Classifier is a transparent rule stub; the trained Random Forest
   replaces it behind `classify_row()` in Week 4 (#10).
 

@@ -83,26 +83,70 @@ def synthetic_flows(n: int = 8, seed: int | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["src_ip", *FEATURE_COLUMNS, "label"])
 
 
-def extract_from_pcap(path: str) -> pd.DataFrame:
-    """Extract per-flow features from a pcap. STUB — fills in with the lab (#1/#4).
+def extract_from_pcap(path: str, min_packets: int = 1) -> pd.DataFrame:
+    """Extract per-source-IP flow features from a pcap.
 
-    The interface is final: returns a DataFrame with `src_ip` + FEATURE_COLUMNS
-    (no `label`, since real captures are unlabeled). Raises if Scapy is missing
-    so the dependency surfaces clearly rather than silently no-op'ing.
+    Groups packets by source IP (the attacker in a flood) and computes
+    FEATURE_COLUMNS for each. Returns a DataFrame with `src_ip` + FEATURE_COLUMNS
+    (no `label` — real captures are unlabeled). Sources with fewer than
+    `min_packets` packets are dropped.
+
+    Scapy is imported lazily so the synthetic path and the rest of the pipeline
+    don't require it; a clear error surfaces if a pcap is parsed without it.
     """
     try:
-        from scapy.all import rdpcap  # noqa: F401  (lazy: only capture needs it)
+        from scapy.all import rdpcap, IP, TCP, UDP
     except ImportError as e:  # pragma: no cover - environment dependent
         raise RuntimeError(
-            "Scapy is required for pcap extraction. `pip install scapy` and "
-            "run on the monitor VM. See detection/capture/README.md."
+            "Scapy is required for pcap extraction. `pip install scapy` "
+            "(see detection/requirements.txt / detection/capture/README.md)."
         ) from e
 
-    raise NotImplementedError(
-        "pcap feature extraction is not implemented yet — Week 2 target (#4). "
-        "Group packets into flows by (src_ip, dst_ip, dst_port, proto), then "
-        "compute FEATURE_COLUMNS per flow. Use synthetic_flows() until then."
-    )
+    packets = rdpcap(path)
+    flows: dict[str, dict] = {}
+    for p in packets:
+        if IP not in p:
+            continue
+        ip = p[IP]
+        f = flows.get(ip.src)
+        if f is None:
+            f = flows[ip.src] = {
+                "times": [], "bytes": 0, "syn": 0, "udp": 0, "dst_ports": set(),
+            }
+        f["times"].append(float(p.time))
+        f["bytes"] += len(p)
+        if TCP in p:
+            flags = p[TCP].flags
+            if "S" in flags and "A" not in flags:   # SYN without ACK
+                f["syn"] += 1
+            f["dst_ports"].add(int(p[TCP].dport))
+        elif UDP in p:
+            f["udp"] += 1
+            f["dst_ports"].add(int(p[UDP].dport))
+
+    rows = []
+    for src, f in flows.items():
+        n = len(f["times"])
+        if n < min_packets:
+            continue
+        t = sorted(f["times"])
+        duration = max(t[-1] - t[0], 0.0)
+        pps = n / duration if duration > 0 else float(n)
+        iats = [(t[i] - t[i - 1]) * 1000.0 for i in range(1, n)]  # ms
+        mean_iat = sum(iats) / len(iats) if iats else 0.0
+        rows.append({
+            "src_ip": src,
+            "duration_s": round(duration, 3),
+            "pkt_count": n,
+            "byte_count": f["bytes"],
+            "pkts_per_s": round(pps, 2),
+            "syn_ratio": round(f["syn"] / n, 3),
+            "udp_ratio": round(f["udp"] / n, 3),
+            "unique_dst_ports": len(f["dst_ports"]),
+            "mean_iat_ms": round(mean_iat, 3),
+            "mean_pkt_size": round(f["bytes"] / n, 1),
+        })
+    return pd.DataFrame(rows, columns=["src_ip", *FEATURE_COLUMNS])
 
 
 if __name__ == "__main__":
