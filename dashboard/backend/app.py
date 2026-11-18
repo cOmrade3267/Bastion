@@ -28,8 +28,10 @@ import pathlib
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from flask import Flask, request, jsonify  # noqa: E402
+from flask import Flask, request, jsonify, send_from_directory  # noqa: E402
 from shared.schema import DetectionEvent, AttackType, ActionTaken  # noqa: E402
+
+FRONTEND_DIR = REPO_ROOT / "dashboard" / "frontend"
 
 app = Flask(__name__)
 
@@ -57,6 +59,12 @@ def parse_event(payload: dict) -> DetectionEvent:
         confidence=float(payload["confidence"]),           # raises on non-number
         action_taken=ActionTaken(payload["action_taken"]),  # raises on unknown value
     )
+
+
+@app.get("/")
+def index():
+    """Serve the live dashboard UI."""
+    return send_from_directory(FRONTEND_DIR, "index.html")
 
 
 @app.get("/health")
