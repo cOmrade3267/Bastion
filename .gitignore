@@ -10,6 +10,9 @@ env/
 *.pcap
 *.pcapng
 dashboard/data/*.csv
+dashboard/data/*.db
+dashboard/data/*.db-wal
+dashboard/data/*.db-shm
 detection/**/*.csv
 
 # Notebooks checkpoints

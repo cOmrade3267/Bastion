@@ -1,7 +1,7 @@
 # Dashboard backend
 
 Minimal Flask service that receives `DetectionEvent`s from the detection
-track and holds them in memory. Validates every event against the shared
+track and stores them in SQLite. Validates every event against the shared
 contract (`shared/schema.py`).
 
 ## Run
@@ -13,13 +13,36 @@ pip install -r requirements.txt
 python app.py            # serves on http://127.0.0.1:5000
 ```
 
+Events are saved to `dashboard/data/bastion.db` (git-ignored) and survive a
+restart. Set `BASTION_DB=/path/to/file.db` to use a different file.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
 ## Endpoints
 
 | Method | Path      | Purpose                                              |
 |--------|-----------|------------------------------------------------------|
 | GET    | `/health` | Liveness + how many events are stored                |
 | POST   | `/event`  | Accept one `DetectionEvent` (JSON), validate, store  |
-| GET    | `/events` | List stored events (in-memory, newest last)          |
+| GET    | `/events` | List stored events, newest last (filters below)      |
+
+### `GET /events` query parameters
+
+| Param          | Meaning                                                     |
+|----------------|-------------------------------------------------------------|
+| `limit`        | Max events returned, 1-1000 (default 100; keeps the newest) |
+| `attack_type`  | `syn_flood`, `udp_flood`, `slowloris` or `benign`           |
+| `action_taken` | `blocked`, `logged` or `none`                               |
+| `src_ip`       | Exact source IP                                             |
+| `since`        | ISO8601 timestamp, e.g. `2026-11-18T10:00:00Z`              |
+
+Response: `{"count": <returned>, "total": <matching>, "events": [...]}`.
+Invalid parameters return 400 with a reason.
 
 ## Test it (issue #6 sync)
 
@@ -42,6 +65,6 @@ curl -s -X POST http://127.0.0.1:5000/event \
 
 ## Scope
 
-Week 2 skeleton: **in-memory only, no database**. A real datastore and the
-live UI feed arrive in Weeks 4–5 (see `docs/PROJECT_PLAN.md`). The
-`shared/schema.py` contract is frozen — changing it is a joint PR.
+SQLite storage and `/events` filtering are in. The live UI feed
+(WebSocket/polling) is still to come (Weeks 4-5, see `docs/PROJECT_PLAN.md`).
+The `shared/schema.py` contract is frozen — changing it is a joint PR.
