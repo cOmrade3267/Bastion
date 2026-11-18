@@ -64,3 +64,31 @@ macro-F1 ≈ **0.98** held-out; 5-fold CV **0.984 ± 0.002**. Top features:
 > differ (and the synthetic SYN-flood profile uses many dst ports, so a real
 > single-port SYN flood currently scores lower confidence until retrained on
 > real data). Re-run with `--data cicddos` for the real baseline (#8 sync).
+
+## Benchmark — RF vs alternatives (#16)
+
+`benchmark.py` trains the RF baseline and alternatives on the **same split** and
+the same 9 `FEATURE_COLUMNS`, reporting macro-F1, accuracy, train time, inference
+latency (µs/flow) and model size, then ranks them vs RF.
+
+```bash
+python models/benchmark.py                        # synthetic
+python models/benchmark.py --data cicddos --csv "data/CICDDoS2019/*.csv"
+```
+
+Candidates: `random_forest`, `extra_trees`, `hist_gradient_boost`, `mlp`, and
+`xgboost` *(only if installed — `pip install xgboost`; it's commented in
+`requirements.txt`)*. Results are written to `benchmark.json`.
+
+Representative synthetic run (`--n-per-class 1500`): RF, ExtraTrees and
+HistGradientBoosting all land within **±0.001 macro-F1** of each other (~0.980);
+the MLP trails slightly. **Verdict: keep RF** — within noise of the best, it is
+the simplest model, already wired into `classify_row()`, and needs no extra
+dependency. Revisit on real CICDDoS2019 data, where a gradient-boosted model may
+separate more.
+
+**On LSTM** (the issue says "XGBoost/LSTM"): an LSTM models an *ordered packet
+sequence*, but our features are one aggregated vector per flow — no time axis for
+an LSTM to use. We benchmark a small MLP as the neural-net comparison and treat a
+true LSTM as a **different feature pipeline** (raw packet sequences) = future
+work, not a drop-in swap at this layer.

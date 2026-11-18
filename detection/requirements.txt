@@ -9,3 +9,7 @@ scapy==2.6.1
 # Model training (#10)
 scikit-learn==1.5.2
 joblib==1.4.2
+
+# Benchmark alternatives (#16) — optional. RF/ExtraTrees/HistGB/MLP come with
+# scikit-learn; install xgboost to add it to `models/benchmark.py`.
+# xgboost==2.1.1

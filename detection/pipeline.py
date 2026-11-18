@@ -29,6 +29,8 @@ sys.path.insert(0, str(HERE))
 from features.extract import synthetic_flows, extract_from_pcap, FEATURE_COLUMNS  # noqa: E402
 from models.classify import classify_row  # noqa: E402
 from emit.emitter import build_event, post_event  # noqa: E402
+from mitigate.blocker import Blocker  # noqa: E402
+from shared.schema import ActionTaken  # noqa: E402
 
 
 def load_flows(source: str, path: str | None, n: int, seed: int | None):
@@ -49,26 +51,63 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--url", default=None, help="dashboard base URL to POST to")
     ap.add_argument("--dry-run", action="store_true", help="print events, do not POST")
+    # --- mitigation (#16) ---
+    ap.add_argument("--mitigate", action="store_true",
+                    help="enable auto-block mitigation (plan mode unless --enforce)")
+    ap.add_argument("--enforce", action="store_true",
+                    help="actually run firewall commands (needs root); default is plan mode")
+    ap.add_argument("--threshold", type=float, default=0.8,
+                    help="min confidence to auto-block (else LOGGED)")
+    ap.add_argument("--block-seconds", type=int, default=300,
+                    help="auto-unblock timeout per IP")
+    ap.add_argument("--allow", action="append", default=[],
+                    help="IP never to block (repeatable); loopback is always allowed")
+    ap.add_argument("--backend", default="auto",
+                    choices=["auto", "nftables", "iptables", "log-only"],
+                    help="firewall backend for mitigation")
     args = ap.parse_args()
 
     if not args.dry_run and not args.url:
         ap.error("pass --url <dashboard> to emit, or --dry-run to just print")
 
+    import logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    blocker = None
+    if args.mitigate:
+        blocker = Blocker(enabled=True, enforce=args.enforce, threshold=args.threshold,
+                          block_seconds=args.block_seconds, allow=args.allow,
+                          backend=args.backend, sweep=True)
+        mode = "ENFORCE (firewall will be modified)" if args.enforce else "PLAN (firewall untouched)"
+        print(f"[mitigate] on — backend={blocker.backend.name}, {mode}, "
+              f"threshold={args.threshold}, block_seconds={args.block_seconds}\n")
+
     flows = load_flows(args.source, args.path, args.n, args.seed)
-    sent = 0
-    for _, row in flows.iterrows():
-        at, conf = classify_row({c: row[c] for c in FEATURE_COLUMNS})
-        event = build_event(src_ip=str(row["src_ip"]), attack_type=at, confidence=conf)
-        if args.dry_run:
-            truth = f"  (truth={row['label']})" if "label" in row else ""
-            print(event.to_json() + truth)
-        else:
-            r = post_event(event, args.url)
-            print(f"POST {event.src_ip} {at.value} -> {r.status_code}")
-            if r.status_code != 202:
-                print("  rejected:", r.text)
-        sent += 1
-    print(f"\n{sent} events {'printed' if args.dry_run else 'emitted'}.")
+    sent = blocked = 0
+    try:
+        for _, row in flows.iterrows():
+            at, conf = classify_row({c: row[c] for c in FEATURE_COLUMNS})
+            src_ip = str(row["src_ip"])
+            action = blocker.consider(at, conf, src_ip) if blocker else None
+            if action is not None and action == ActionTaken.BLOCKED:
+                blocked += 1
+            event = build_event(src_ip=src_ip, attack_type=at, confidence=conf,
+                                action_taken=action)
+            if args.dry_run:
+                truth = f"  (truth={row['label']})" if "label" in row else ""
+                print(event.to_json() + truth)
+            else:
+                r = post_event(event, args.url)
+                print(f"POST {event.src_ip} {at.value} {event.action_taken.value} -> {r.status_code}")
+                if r.status_code != 202:
+                    print("  rejected:", r.text)
+            sent += 1
+    finally:
+        if blocker:
+            print(f"\n[mitigate] active blocks: {blocker.active()}")
+            blocker.close()
+    tail = f", {blocked} blocked" if blocker else ""
+    print(f"\n{sent} events {'printed' if args.dry_run else 'emitted'}{tail}.")
 
 
 if __name__ == "__main__":
