@@ -1,0 +1,10 @@
+# Detection track dependencies
+pandas==2.2.3
+numpy==2.1.3
+requests==2.32.3
+
+# Capture (monitor VM only; needs root to sniff)
+scapy==2.6.1
+
+# Model training lands in Week 4 (#10); uncomment then:
+# scikit-learn==1.5.2
