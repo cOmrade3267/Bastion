@@ -3,8 +3,9 @@ Bastion — detection feature extraction (Week 2 skeleton)
 ========================================================
 Turns captured traffic into per-flow feature rows. Two sources:
 
-  * synthetic_flows(n)      -> generated rows for dev/testing without the lab
-  * extract_from_pcap(path) -> real features from a capture (Scapy, lazy import)
+  * synthetic_flows(n)           -> generated rows for dev/testing without the lab
+  * extract_from_pcap(path)      -> real features from a capture (Scapy, lazy import)
+  * extract_from_live(iface, s)  -> real features sniffed live (Week-5 loop)
 
 The feature columns here are the thing the Week 3 sync (#9) compares
 column-for-column against the dashboard's training matrix. Keep FEATURE_COLUMNS
@@ -95,14 +96,45 @@ def extract_from_pcap(path: str, min_packets: int = 1) -> pd.DataFrame:
     don't require it; a clear error surfaces if a pcap is parsed without it.
     """
     try:
-        from scapy.all import rdpcap, IP, TCP, UDP
+        from scapy.all import rdpcap
     except ImportError as e:  # pragma: no cover - environment dependent
         raise RuntimeError(
             "Scapy is required for pcap extraction. `pip install scapy` "
             "(see detection/requirements.txt / detection/capture/README.md)."
         ) from e
+    return _aggregate_packets(rdpcap(path), min_packets=min_packets)
 
-    packets = rdpcap(path)
+
+def extract_from_live(interface: str, seconds: float = 5.0,
+                      min_packets: int = 1) -> pd.DataFrame:
+    """Sniff `seconds` of live traffic on `interface`, return flow features.
+
+    Same FEATURE_COLUMNS and per-source-IP aggregation as `extract_from_pcap`,
+    so the trained model and the whole pipeline work on live traffic unchanged.
+    This is the capture half of the Week-5 real-time loop (pipeline.py --source
+    live --window N). Needs Scapy and root/CAP_NET_RAW, so it is not exercised
+    in CI — the synthetic path covers development.
+    """
+    try:
+        from scapy.all import sniff
+    except ImportError as e:  # pragma: no cover - environment dependent
+        raise RuntimeError(
+            "Scapy is required for live capture. `pip install scapy` and run "
+            "with root/CAP_NET_RAW (see detection/capture/README.md)."
+        ) from e
+    packets = sniff(iface=interface, timeout=seconds)
+    return _aggregate_packets(packets, min_packets=min_packets)
+
+
+def _aggregate_packets(packets, min_packets: int = 1) -> pd.DataFrame:
+    """Aggregate Scapy packets into per-source-IP flow rows (FEATURE_COLUMNS).
+
+    Shared by `extract_from_pcap` and `extract_from_live`: groups by source IP
+    (the attacker in a flood). Returns a DataFrame with `src_ip` +
+    FEATURE_COLUMNS (no `label` — captures are unlabeled). Sources with fewer
+    than `min_packets` packets are dropped.
+    """
+    from scapy.all import IP, TCP, UDP  # lazy; caller ensured scapy is present
     flows: dict[str, dict] = {}
     for p in packets:
         if IP not in p:
