@@ -4,10 +4,15 @@ Bastion — Random Forest trainer (issue #10)
 Trains the detection classifier on FEATURE_COLUMNS and saves an artifact that
 classify_row() loads for live inference.
 
-    # test run, no download needed:
+    # test run, no download needed (random stratified split):
     python train_rf.py --data synthetic
 
-    # real data once you have the CSVs:
+    # real data, CICDDoS2019 OFFICIAL split (train day vs test day):
+    python train_rf.py --data cicddos \
+        --train-csv "data/CICDDoS2019/CSV-01-12/*.csv" \
+        --test-csv  "data/CICDDoS2019/CSV-03-11/*.csv" --cv
+
+    # real data, single pile with a random stratified split instead:
     python train_rf.py --data cicddos --csv "data/CICDDoS2019/*.csv"
 
 Outputs (in detection/models/):
@@ -20,6 +25,10 @@ Design notes grounded in the CICDDoS2019 literature:
     which are the usual source of fake ~1.0 F1 (leakage).
   - preprocessing that could leak (none needed beyond sanitation) is kept out
     of the fit; the split is stratified; class_weight balances the classes.
+  - the honest protocol is the dataset's OWN train/test day split (--train-csv /
+    --test-csv): the model never sees the test day, so numbers don't flatter.
+    A random split of one pile (--csv) can leak near-duplicate flows across the
+    split and inflate scores — use it only for a quick sanity pass.
 """
 
 from __future__ import annotations
@@ -61,49 +70,89 @@ def build_model(seed: int) -> RandomForestClassifier:
     )
 
 
+def _xy(df: pd.DataFrame):
+    return df[FEATURE_COLUMNS].to_numpy(dtype=float), df["label"].to_numpy()
+
+
+def load_split(args):
+    """Return (X_tr, y_tr, X_te, y_te, source, protocol).
+
+    Three protocols:
+      * synthetic               -> generate, then random stratified split
+      * cicddos + train/test csv -> the dataset's own train-day/test-day split
+      * cicddos + --csv          -> one pile, random stratified split
+    """
+    if args.data == "synthetic":
+        df = make_synthetic(n_per_class=args.n_per_class, seed=args.seed)
+        X, y = _xy(df)
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X, y, test_size=args.test_size, random_state=args.seed, stratify=y)
+        source = f"synthetic (n_per_class={args.n_per_class}, seed={args.seed})"
+        return X_tr, y_tr, X_te, y_te, source, "random split"
+
+    # --- cicddos ---
+    if args.train_csv or args.test_csv:
+        if not (args.train_csv and args.test_csv):
+            raise SystemExit("--train-csv and --test-csv must be given together")
+        df_tr = load_cicddos2019(args.train_csv)
+        df_te = load_cicddos2019(args.test_csv)
+        X_tr, y_tr = _xy(df_tr)
+        X_te, y_te = _xy(df_te)
+        print(f"train set: {len(df_tr)} rows · {dict(pd.Series(y_tr).value_counts())}")
+        print(f"test  set: {len(df_te)} rows · {dict(pd.Series(y_te).value_counts())}")
+        source = (f"CICDDoS2019 official split "
+                  f"(train={args.train_csv} | test={args.test_csv})")
+        return X_tr, y_tr, X_te, y_te, source, "official train/test day split"
+
+    if not args.csv:
+        raise SystemExit("--data cicddos requires either --csv <glob>, "
+                         "or both --train-csv and --test-csv")
+    df = load_cicddos2019(args.csv)
+    X, y = _xy(df)
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=args.test_size, random_state=args.seed, stratify=y)
+    source = f"CICDDoS2019 ({args.csv}) random split test_size={args.test_size}"
+    return X_tr, y_tr, X_te, y_te, source, "random split"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", choices=["synthetic", "cicddos"], default="synthetic")
-    ap.add_argument("--csv", help="glob for CICDDoS2019 CSVs (with --data cicddos)")
+    ap.add_argument("--csv", help="glob for CICDDoS2019 CSVs — one pile, random split")
+    ap.add_argument("--train-csv", help="glob for the CICDDoS2019 TRAINING day (CSV-01-12)")
+    ap.add_argument("--test-csv", help="glob for the CICDDoS2019 TESTING day (CSV-03-11)")
     ap.add_argument("--n-per-class", type=int, default=2500, help="synthetic size")
-    ap.add_argument("--test-size", type=float, default=0.25)
+    ap.add_argument("--test-size", type=float, default=0.25,
+                    help="random-split test fraction (ignored for --train-csv/--test-csv)")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--cv", action="store_true", help="also run 5-fold CV")
+    ap.add_argument("--cv", action="store_true",
+                    help="also run 5-fold CV on the TRAINING set")
     args = ap.parse_args()
 
-    if args.data == "synthetic":
-        df = make_synthetic(n_per_class=args.n_per_class, seed=args.seed)
-        source = f"synthetic (n_per_class={args.n_per_class}, seed={args.seed})"
-    else:
-        if not args.csv:
-            ap.error("--data cicddos requires --csv <glob>")
-        df = load_cicddos2019(args.csv)
-        source = f"CICDDoS2019 ({args.csv})"
-
-    X = df[FEATURE_COLUMNS].to_numpy(dtype=float)
-    y = df["label"].to_numpy()
-    print(f"dataset: {len(df)} rows · classes: "
-          f"{dict(pd.Series(y).value_counts())}")
-
-    X_tr, X_te, y_tr, y_te = train_test_split(
-        X, y, test_size=args.test_size, random_state=args.seed, stratify=y)
+    X_tr, y_tr, X_te, y_te, source, protocol = load_split(args)
+    print(f"protocol: {protocol}")
+    print(f"split: {len(X_tr)} train / {len(X_te)} test rows")
 
     clf = build_model(args.seed)
     clf.fit(X_tr, y_tr)
     y_pred = clf.predict(X_te)
 
-    labels = sorted(np.unique(y))
-    report = classification_report(y_te, y_pred, labels=labels,
+    # Report over the union of labels seen in train or test, so a class that is
+    # absent from one side still shows up (with zeros) instead of vanishing.
+    labels = sorted(set(map(str, y_tr)) | set(map(str, y_te)))
+    y_te_s = y_te.astype(str)
+    y_pred_s = y_pred.astype(str)
+    report = classification_report(y_te_s, y_pred_s, labels=labels,
                                    output_dict=True, zero_division=0)
-    macro_f1 = f1_score(y_te, y_pred, average="macro", labels=labels)
-    cm = confusion_matrix(y_te, y_pred, labels=labels)
+    macro_f1 = f1_score(y_te_s, y_pred_s, average="macro", labels=labels)
+    cm = confusion_matrix(y_te_s, y_pred_s, labels=labels)
     importances = dict(sorted(
         zip(FEATURE_COLUMNS, clf.feature_importances_.round(4)),
         key=lambda kv: -kv[1]))
 
     # --- report to console ---
     print("\n=== per-class metrics (held-out test) ===")
-    print(classification_report(y_te, y_pred, labels=labels, zero_division=0))
+    print(classification_report(y_te_s, y_pred_s, labels=labels, zero_division=0))
     print(f"macro-F1: {macro_f1:.4f}   accuracy: {report['accuracy']:.4f}")
     print("\nconfusion matrix (rows=true, cols=pred):")
     print(pd.DataFrame(cm, index=labels, columns=labels).to_string())
@@ -111,36 +160,48 @@ def main():
     for k, v in importances.items():
         print(f"  {k:<18} {v}")
 
+    missing = [c for c in labels if c not in set(map(str, y_tr))]
+    if missing:
+        print(f"\nWARNING: classes absent from the TRAINING set (model can't "
+              f"predict them): {missing}. CICDDoS2019 has no slowloris — add "
+              f"CIC-IDS2017 DoS CSVs to the --train-csv glob to cover it.")
+
     if args.cv:
-        cv = cross_val_score(build_model(args.seed), X, y, cv=5, scoring="f1_macro")
-        print(f"\n5-fold CV macro-F1: {cv.mean():.4f} ± {cv.std():.4f}")
+        cv = cross_val_score(build_model(args.seed), X_tr, y_tr, cv=5,
+                             scoring="f1_macro")
+        print(f"\n5-fold CV macro-F1 (train set): {cv.mean():.4f} ± {cv.std():.4f}")
 
     # --- persist ---
     import joblib
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     joblib.dump({
         "model": clf,
         "features": list(FEATURE_COLUMNS),
         "classes": list(clf.classes_),
-        "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "trained_at": now,
         "source": source,
     }, MODEL_PATH)
 
+    y_all = np.concatenate([y_tr, y_te]).astype(str)
     METRICS_PATH.write_text(json.dumps({
         "source": source,
-        "n_rows": len(df),
-        "class_counts": {k: int(v) for k, v in pd.Series(y).value_counts().items()},
+        "protocol": protocol,
+        "n_rows": int(len(X_tr) + len(X_te)),
+        "train_rows": int(len(X_tr)),
+        "test_rows": int(len(X_te)),
+        "class_counts": {k: int(v) for k, v in pd.Series(y_all).value_counts().items()},
         "accuracy": report["accuracy"],
         "macro_f1": macro_f1,
         "per_class": {c: report[c] for c in labels},
         "feature_importances": importances,
-        "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "trained_at": now,
     }, indent=2))
     pd.DataFrame(cm, index=labels, columns=labels).to_csv(CONFUSION_PATH)
 
     print(f"\nsaved: {MODEL_PATH.name}, {METRICS_PATH.name}, {CONFUSION_PATH.name}")
     if source.startswith("synthetic"):
         print("NOTE: metrics are on SYNTHETIC data — real CICDDoS2019 numbers "
-              "will differ. Re-run with --data cicddos --csv <path> for real.")
+              "will differ. Re-run with --data cicddos and the real CSVs.")
 
 
 if __name__ == "__main__":
