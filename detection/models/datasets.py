@@ -97,19 +97,26 @@ def _col(df: pd.DataFrame, *names):
     return None
 
 
-def load_cicddos2019(paths) -> pd.DataFrame:
-    """Load one or more CICDDoS2019 CSVs and map to FEATURE_COLUMNS + label.
-
-    `paths` may be a glob string, a path, or a list of them. Handles the
-    leading-space column names and Inf/NaN from rate features.
-    """
+def _resolve_files(paths):
     if isinstance(paths, (str, pathlib.Path)):
         files = sorted(_glob.glob(str(paths)))
     else:
         files = [f for p in paths for f in sorted(_glob.glob(str(p)))]
     if not files:
         raise FileNotFoundError(f"no CSVs matched: {paths}")
+    return files
 
+
+def _load_cicflowmeter(paths, label_norm, tag: str) -> pd.DataFrame:
+    """Load CICFlowMeter-style CSVs -> FEATURE_COLUMNS + label.
+
+    Shared by the CICDDoS2019 and InSDN loaders — both are CICFlowMeter output,
+    so only the label taxonomy differs (`label_norm` maps a raw label string to
+    one of our classes, or None to drop the row). Handles leading-space column
+    names and Inf/NaN from rate features. Keeps NO socket identifiers
+    (IP/port/timestamp): the literature shows those leak and give fake ~1.0 F1.
+    """
+    files = _resolve_files(paths)
     frames = []
     dropped_total = 0
     for fp in files:
@@ -127,8 +134,14 @@ def load_cicddos2019(paths) -> pd.DataFrame:
         c_iat = _col(raw, "Flow IAT Mean")
         c_size = _col(raw, "Average Packet Size", "Pkt Size Avg", "Packet Length Mean")
         c_label = _col(raw, "Label")
-        if c_label is None:
-            raise ValueError(f"{fp}: no Label column")
+        # Skip (don't crash on) CSVs in the folder that aren't CICFlowMeter output
+        # — e.g. a custom-feature or pre-aggregated file mixed into the same dir.
+        missing = [n for n, c in (("Label", c_label), ("Fwd Packets", c_fwd),
+                                  ("Flow Duration", c_dur)) if c is None]
+        if missing:
+            print(f"[{tag}] skip {fp}: not CICFlowMeter-shaped "
+                  f"(missing {', '.join(missing)})")
+            continue
 
         n_pkts = raw[c_fwd].fillna(0) + (raw[c_bwd].fillna(0) if c_bwd else 0)
         n_pkts = n_pkts.clip(lower=1)
@@ -146,7 +159,7 @@ def load_cicddos2019(paths) -> pd.DataFrame:
             "mean_iat_ms": (raw[c_iat].astype(float) / 1000.0) if c_iat else 0.0,
             "mean_pkt_size": raw[c_size] if c_size else (n_bytes / n_pkts),
         })
-        out["label"] = raw[c_label].map(_norm_label)
+        out["label"] = raw[c_label].map(label_norm)
         before = len(out)
         out = out.dropna(subset=["label"])
         dropped_total += before - len(out)
@@ -158,6 +171,45 @@ def load_cicddos2019(paths) -> pd.DataFrame:
     for col in FEATURE_COLUMNS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=FEATURE_COLUMNS).drop_duplicates().reset_index(drop=True)
-    print(f"[cicddos] loaded {len(df)} rows from {len(files)} file(s); "
+    print(f"[{tag}] loaded {len(df)} rows from {len(files)} file(s); "
           f"dropped {dropped_total} out-of-schema rows")
     return df[[*FEATURE_COLUMNS, "label"]]
+
+
+def load_cicddos2019(paths) -> pd.DataFrame:
+    """Load CICDDoS2019 CSVs -> FEATURE_COLUMNS + 4 flood-type labels."""
+    return _load_cicflowmeter(paths, _norm_label, "cicddos")
+
+
+# --------------------------------------------------------------------------- #
+# InSDN loader — CICFlowMeter CSVs, SDN attack taxonomy -> our classes
+# --------------------------------------------------------------------------- #
+# InSDN labels: Normal, DoS, DDoS, Probe, BFA, Web-Attack, BOTNET, U2R.
+# We keep the DDoS-relevant + large classes (benign/dos/ddos/probe) and drop the
+# small non-DDoS ones (BFA, Web-Attack, BOTNET, U2R) with a count. Order matters:
+# match "ddos" before "dos" (ddos contains the substring "dos").
+_INSDN_LABEL_MAP = [
+    ("normal", "benign"),
+    ("ddos", "ddos"),
+    ("dos", "dos"),
+    ("probe", "probe"),
+]
+INSDN_CLASSES = ["benign", "dos", "ddos", "probe"]
+
+
+def _norm_insdn_label(raw: str):
+    s = str(raw).strip().lower()
+    for key, cls in _INSDN_LABEL_MAP:
+        if key in s:
+            return cls
+    return None  # out-of-schema (BFA/Web-Attack/BOTNET/U2R) -> dropped
+
+
+def load_insdn(paths) -> pd.DataFrame:
+    """Load InSDN CSVs -> FEATURE_COLUMNS + {benign,dos,ddos,probe} labels.
+
+    InSDN is CICFlowMeter output (84 cols) mapped down to the same 9 features
+    the live extractor produces, so a model trained here drops into live
+    inference. Small non-DDoS classes are dropped (see _INSDN_LABEL_MAP).
+    """
+    return _load_cicflowmeter(paths, _norm_insdn_label, "insdn")

@@ -11,6 +11,9 @@ env/
 *.pcapng
 dashboard/data/*.csv
 detection/**/*.csv
+# raw downloaded datasets (InSDN/CICDDoS, license-gated, multi-GB) + fetch target
+/dataset/
+detection/models/data/
 
 # Trained model artifacts (regenerate with detection/models/train_rf.py)
 *.joblib

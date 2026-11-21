@@ -49,7 +49,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 from features.extract import FEATURE_COLUMNS  # noqa: E402
-from models.datasets import make_synthetic, load_cicddos2019  # noqa: E402
+from models.datasets import make_synthetic, load_cicddos2019, load_insdn  # noqa: E402
+
+_LOADERS = {"cicddos": load_cicddos2019, "insdn": load_insdn}
 
 MODEL_PATH = HERE / "rf_model.joblib"
 METRICS_PATH = HERE / "metrics.json"
@@ -90,35 +92,38 @@ def load_split(args):
         source = f"synthetic (n_per_class={args.n_per_class}, seed={args.seed})"
         return X_tr, y_tr, X_te, y_te, source, "random split"
 
-    # --- cicddos ---
+    # --- real datasets (cicddos | insdn): both are CICFlowMeter CSVs ---
+    loader = _LOADERS[args.data]
+    name = args.data.upper()
+
     if args.train_csv or args.test_csv:
         if not (args.train_csv and args.test_csv):
             raise SystemExit("--train-csv and --test-csv must be given together")
-        df_tr = load_cicddos2019(args.train_csv)
-        df_te = load_cicddos2019(args.test_csv)
+        df_tr = loader(args.train_csv)
+        df_te = loader(args.test_csv)
         X_tr, y_tr = _xy(df_tr)
         X_te, y_te = _xy(df_te)
         print(f"train set: {len(df_tr)} rows · {dict(pd.Series(y_tr).value_counts())}")
         print(f"test  set: {len(df_te)} rows · {dict(pd.Series(y_te).value_counts())}")
-        source = (f"CICDDoS2019 official split "
-                  f"(train={args.train_csv} | test={args.test_csv})")
-        return X_tr, y_tr, X_te, y_te, source, "official train/test day split"
+        source = f"{name} explicit split (train={args.train_csv} | test={args.test_csv})"
+        return X_tr, y_tr, X_te, y_te, source, "explicit train/test split"
 
     if not args.csv:
-        raise SystemExit("--data cicddos requires either --csv <glob>, "
+        raise SystemExit(f"--data {args.data} requires either --csv <glob>, "
                          "or both --train-csv and --test-csv")
-    df = load_cicddos2019(args.csv)
+    df = loader(args.csv)
     X, y = _xy(df)
     X_tr, X_te, y_tr, y_te = train_test_split(
         X, y, test_size=args.test_size, random_state=args.seed, stratify=y)
-    source = f"CICDDoS2019 ({args.csv}) random split test_size={args.test_size}"
-    return X_tr, y_tr, X_te, y_te, source, "random split"
+    print(f"dataset: {len(df)} rows · {dict(pd.Series(y).value_counts())}")
+    source = f"{name} ({args.csv}) random split test_size={args.test_size}"
+    return X_tr, y_tr, X_te, y_te, source, "random stratified split"
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", choices=["synthetic", "cicddos"], default="synthetic")
-    ap.add_argument("--csv", help="glob for CICDDoS2019 CSVs — one pile, random split")
+    ap.add_argument("--data", choices=["synthetic", "cicddos", "insdn"], default="synthetic")
+    ap.add_argument("--csv", help="glob for real CSVs (cicddos/insdn) — one pile, random split")
     ap.add_argument("--train-csv", help="glob for the CICDDoS2019 TRAINING day (CSV-01-12)")
     ap.add_argument("--test-csv", help="glob for the CICDDoS2019 TESTING day (CSV-03-11)")
     ap.add_argument("--n-per-class", type=int, default=2500, help="synthetic size")
