@@ -1,31 +1,66 @@
 """
-Bastion — detection classifier (Week 2 placeholder)
-===================================================
+Bastion — detection classifier
+===============================
 Maps one feature row to (AttackType, confidence).
 
-This is a transparent rule-based PLACEHOLDER so the end-to-end pipeline runs
-and emits events before the real model exists. It gets replaced by the trained
-Random Forest in Week 4 (#10) behind this same `classify_row` interface — keep
-the signature stable so the emitter/pipeline don't change.
+Two backends behind one stable interface, `classify_row`:
+  1. the trained Random Forest (rf_model.joblib) if present — train it with
+     train_rf.py (issue #10);
+  2. a transparent rule-based fallback, so the pipeline runs even with no model
+     committed.
+
+Callers (emitter, pipeline) never change when the model is swapped in.
 """
 
 from __future__ import annotations
 
-import sys
 import pathlib
+import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from shared.schema import AttackType  # noqa: E402
 
+MODEL_PATH = pathlib.Path(__file__).resolve().parent / "rf_model.joblib"
+_bundle = None
+_tried = False
+
+
+def _load_model():
+    """Lazy-load the RF bundle once; return None if absent/unloadable."""
+    global _bundle, _tried
+    if _tried:
+        return _bundle
+    _tried = True
+    if MODEL_PATH.exists():
+        try:
+            import joblib
+            _bundle = joblib.load(MODEL_PATH)
+        except Exception as e:  # pragma: no cover
+            print(f"[classify] could not load model ({e}); using rule fallback")
+            _bundle = None
+    return _bundle
+
 
 def classify_row(f: dict) -> tuple[AttackType, float]:
     """Return (attack_type, confidence in [0,1]) for one feature row.
 
-    Rule-based stand-in for the RF model. Thresholds mirror the synthetic
-    profiles in features/extract.py; they are NOT tuned for real traffic.
+    Uses the trained RF if available, else the rule-based fallback.
     """
+    bundle = _load_model()
+    if bundle is not None:
+        X = [[float(f.get(c, 0.0)) for c in bundle["features"]]]
+        proba = bundle["model"].predict_proba(X)[0]
+        i = int(proba.argmax())
+        cls = bundle["classes"][i]
+        conf = round(min(0.999, float(proba[i])), 3)
+        return AttackType(cls), conf
+    return _rule_based(f)
+
+
+def _rule_based(f: dict) -> tuple[AttackType, float]:
+    """Rule-based stand-in used until the RF model is trained."""
     syn = float(f.get("syn_ratio", 0.0))
     udp = float(f.get("udp_ratio", 0.0))
     pps = float(f.get("pkts_per_s", 0.0))
@@ -37,13 +72,11 @@ def classify_row(f: dict) -> tuple[AttackType, float]:
     if udp > 0.6 and pps > 500:
         return AttackType.UDP_FLOOD, _conf(udp)
     if duration > 30 and pps < 50 and iat > 400:
-        # low-and-slow signature
         return AttackType.SLOWLORIS, _conf(min(1.0, iat / 5000 + 0.5))
     return AttackType.BENIGN, _conf(0.7)
 
 
 def _conf(x: float) -> float:
-    """Clamp a raw score into a believable confidence band [0.5, 0.99]."""
     return round(max(0.5, min(0.99, x)), 3)
 
 
@@ -52,6 +85,8 @@ if __name__ == "__main__":
     sys.path.insert(0, str(_pl.Path(__file__).resolve().parents[1]))
     from features.extract import synthetic_flows, FEATURE_COLUMNS
 
+    backend = "RF model" if _load_model() else "rule fallback"
+    print(f"backend: {backend}\n")
     df = synthetic_flows(8, seed=1)
     for _, row in df.iterrows():
         at, conf = classify_row({c: row[c] for c in FEATURE_COLUMNS})
