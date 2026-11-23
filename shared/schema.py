@@ -18,10 +18,14 @@ import json
 
 
 class AttackType(str, Enum):
-    SYN_FLOOD = "syn_flood"
-    UDP_FLOOD = "udp_flood"
-    SLOWLORIS = "slowloris"
+    # InSDN taxonomy — matches what the live model emits (see
+    # detection/models/datasets.py INSDN_CLASSES and models/metrics.json).
+    # The earlier CICDDoS flood types (syn_flood/udp_flood/slowloris) were
+    # retired when detection pivoted to InSDN in #35.
     BENIGN = "benign"
+    DOS = "dos"
+    DDOS = "ddos"
+    PROBE = "probe"
 
 
 class ActionTaken(str, Enum):
@@ -58,7 +62,7 @@ if __name__ == "__main__":
     ev = DetectionEvent(
         timestamp=DetectionEvent.now_iso(),
         src_ip="10.0.0.5",
-        attack_type=AttackType.SYN_FLOOD,
+        attack_type=AttackType.DDOS,
         confidence=0.94,
         action_taken=ActionTaken.BLOCKED,
     )

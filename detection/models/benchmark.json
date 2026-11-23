@@ -1,0 +1,67 @@
+{
+  "source": "synthetic (n_per_class=1500, seed=42)",
+  "n_rows": 6000,
+  "test_size": 0.25,
+  "seed": 42,
+  "baseline_macro_f1": 0.98,
+  "results": [
+    {
+      "model": "extra_trees",
+      "macro_f1": 0.9813,
+      "accuracy": 0.9813,
+      "train_s": 0.14,
+      "infer_us_per_flow": 16.4,
+      "size_kb": 11220.4,
+      "per_class_f1": {
+        "benign": 0.9826,
+        "slowloris": 0.9788,
+        "syn_flood": 0.9841,
+        "udp_flood": 0.9799
+      }
+    },
+    {
+      "model": "hist_gradient_boost",
+      "macro_f1": 0.9807,
+      "accuracy": 0.9807,
+      "train_s": 4.657,
+      "infer_us_per_flow": 32.39,
+      "size_kb": 1661.3,
+      "per_class_f1": {
+        "benign": 0.9826,
+        "slowloris": 0.9775,
+        "syn_flood": 0.9841,
+        "udp_flood": 0.9786
+      }
+    },
+    {
+      "model": "random_forest",
+      "macro_f1": 0.98,
+      "accuracy": 0.98,
+      "train_s": 0.179,
+      "infer_us_per_flow": 23.87,
+      "size_kb": 3589.4,
+      "per_class_f1": {
+        "benign": 0.9799,
+        "slowloris": 0.9761,
+        "syn_flood": 0.9841,
+        "udp_flood": 0.9799
+      }
+    },
+    {
+      "model": "mlp",
+      "macro_f1": 0.978,
+      "accuracy": 0.978,
+      "train_s": 0.208,
+      "infer_us_per_flow": 0.95,
+      "size_kb": 75.0,
+      "per_class_f1": {
+        "benign": 0.9747,
+        "slowloris": 0.9747,
+        "syn_flood": 0.9841,
+        "udp_flood": 0.9785
+      }
+    }
+  ],
+  "lstm": "out of scope \u2014 requires sequence features, not flow aggregates",
+  "benchmarked_at": "2026-11-18T15:40:58+00:00"
+}

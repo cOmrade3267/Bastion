@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Data / captures (keep the repo light; share datasets out-of-band)
+*.pcap
+*.pcapng
+dashboard/data/*.csv
+detection/**/*.csv
+# raw downloaded datasets (InSDN/CICDDoS, license-gated, multi-GB) + fetch target
+/dataset/
+detection/models/data/
+
+# Trained model artifacts (regenerate with detection/models/train_rf.py)
+*.joblib
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
