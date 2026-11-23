@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bastion — Live Dashboard</title>
+<style>
+  /* ---- Design tokens (data-viz reference palette) ---------------------- */
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --surface-2:   #f3f2ee;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --axis:        #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --shadow:      rgba(11,11,11,0.06);
+
+    /* attack_type (InSDN) — 3 validated categorical hues + neutral benign */
+    --dos:     #2a78d6;   /* blue   */
+    --ddos:    #eb6834;   /* orange */
+    --probe:   #1baf7a;   /* aqua   */
+    --benign:  #a6a49b;   /* neutral gray baseline */
+
+    /* action_taken — reserved status colors */
+    --good:    #0ca30c;   /* blocked  */
+    --warn:    #fab219;   /* logged   */
+    --warn-ink:#0b0b0b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --surface-2: #232321;
+      --ink:       #f0efec;
+      --ink-2:     #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --axis:      #383835;
+      --border:    rgba(255,255,255,0.10);
+      --shadow:    rgba(0,0,0,0.4);
+      --dos:    #3987e5;
+      --ddos:    #d95926;
+      --probe:   #199e70;
+      --benign: #73726b;
+      --good:   #0ca30c;
+      --warn:   #fab219;
+      --warn-ink:#0b0b0b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --surface-2: #232321;
+    --ink:       #f0efec;
+    --ink-2:     #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --axis:      #383835;
+    --border:    rgba(255,255,255,0.10);
+    --shadow:    rgba(0,0,0,0.4);
+    --dos:    #3987e5;
+    --ddos:    #d95926;
+    --probe:   #199e70;
+    --benign: #73726b;
+    --good:   #0ca30c;
+    --warn:   #fab219;
+    --warn-ink:#0b0b0b;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font: 400 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  /* ---- Header ---------------------------------------------------------- */
+  header.top {
+    display: flex; align-items: center; gap: 16px;
+    flex-wrap: wrap; margin-bottom: 20px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .mark {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    background: linear-gradient(135deg, var(--dos), var(--probe));
+    display: grid; place-items: center; color: #fff; font-weight: 700;
+  }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-2); font-size: 12.5px; margin-top: 1px; }
+  .spacer { flex: 1 1 auto; }
+  .live {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12.5px; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 11px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+  .live.on .dot { animation: pulse 1.6s ease-in-out infinite; }
+  .live.off .dot { background: var(--warn); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.8)} }
+  @media (prefers-reduced-motion: reduce) { .live.on .dot { animation: none; } }
+  .btn {
+    font: inherit; font-size: 13px; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 11px; cursor: pointer;
+  }
+  .btn:hover { background: var(--surface-2); }
+
+  /* ---- Stat tiles ------------------------------------------------------ */
+  .tiles {
+    display: grid; gap: 12px; margin-bottom: 16px;
+    grid-template-columns: repeat(4, 1fr);
+  }
+  @media (max-width: 720px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 2px var(--shadow);
+  }
+  .tile .label { font-size: 12px; color: var(--ink-2); display:flex; align-items:center; gap:6px; }
+  .tile .value {
+    font-size: 30px; font-weight: 650; margin-top: 6px; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .tile .value small { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .tile .accent { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ---- Cards / layout -------------------------------------------------- */
+  .grid2 { display: grid; gap: 16px; grid-template-columns: 1.15fr 1fr; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 2px var(--shadow);
+  }
+  .card h2 {
+    font-size: 13px; font-weight: 600; margin: 0 0 14px;
+    color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .card h2 .count { color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
+
+  /* ---- Bar chart (attack-type distribution) ---------------------------- */
+  .bars { display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 10px; }
+  .bar-row .name { font-size: 13px; color: var(--ink-2); display:flex; align-items:center; gap:7px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .track { height: 20px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+  .fill {
+    height: 100%; border-radius: 5px; min-width: 2px;
+    transition: width .4s cubic-bezier(.22,.61,.36,1);
+  }
+  .bar-row .num { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink); min-width: 2.5em; text-align: right; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--grid); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+
+  /* ---- Tables ---------------------------------------------------------- */
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  thead th {
+    text-align: left; font-weight: 600; font-size: 11.5px; letter-spacing: 0.03em;
+    text-transform: uppercase; color: var(--muted); padding: 0 10px 8px;
+    border-bottom: 1px solid var(--grid); white-space: nowrap;
+  }
+  tbody td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.ip, td.time, td.conf { font-variant-numeric: tabular-nums; }
+  td.time { color: var(--ink-2); white-space: nowrap; }
+  td.ip { font-weight: 550; }
+  tbody tr { border-left: 3px solid transparent; }
+  tr[data-type="dos"]    { border-left-color: var(--dos); }
+  tr[data-type="ddos"]   { border-left-color: var(--ddos); }
+  tr[data-type="probe"]  { border-left-color: var(--probe); }
+  tr[data-type="benign"] { border-left-color: var(--benign); }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 550; padding: 2px 9px 2px 7px; border-radius: 999px;
+    border: 1px solid var(--border); white-space: nowrap;
+  }
+  .chip .swatch { width: 8px; height: 8px; }
+
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; }
+  .status svg { width: 14px; height: 14px; flex: none; }
+  .status.blocked { color: var(--good); }
+  .status.logged  { color: #8a6400; }
+  :root[data-theme="dark"] .status.logged,
+  :root:not([data-theme="light"]) .status.logged { color: var(--warn); }
+  .status.none { color: var(--muted); }
+
+  /* confidence meter */
+  .conf-wrap { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .meter { width: 54px; height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .meter > i { display: block; height: 100%; border-radius: 3px; }
+  .conf-num { min-width: 2.8em; text-align: right; color: var(--ink-2); }
+
+  .empty { color: var(--muted); font-size: 13.5px; padding: 18px 2px; text-align: center; }
+
+  /* tooltip */
+  #tip {
+    position: fixed; z-index: 20; pointer-events: none; opacity: 0;
+    background: var(--ink); color: var(--page); font-size: 12px; line-height: 1.4;
+    padding: 6px 9px; border-radius: 7px; transition: opacity .12s; max-width: 220px;
+    box-shadow: 0 4px 14px var(--shadow);
+  }
+  footer { margin-top: 26px; color: var(--muted); font-size: 11.5px; text-align: center; }
+  footer code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="mark">B</div>
+      <div>
+        <h1>Bastion</h1>
+        <div class="sub">Live DDoS detection monitor</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div id="live" class="live off"><span class="dot"></span><span id="live-txt">connecting…</span></div>
+    <button class="btn" id="theme" title="Toggle light / dark">◐ Theme</button>
+  </header>
+
+  <!-- Stat tiles -->
+  <section class="tiles">
+    <div class="tile">
+      <div class="label"><span class="accent" style="background:var(--ink-2)"></span>Total events</div>
+      <div class="value" id="t-total">0</div>
+    </div>
+    <div class="tile">
+      <div class="label"><span class="accent" style="background:var(--ddos)"></span>Active threats</div>
+      <div class="value" id="t-threats">0 <small id="t-threats-pct"></small></div>
+    </div>
+    <div class="tile">
+      <div class="label"><span class="accent" style="background:var(--dos)"></span>Flagged IPs</div>
+      <div class="value" id="t-ips">0</div>
+    </div>
+    <div class="tile">
+      <div class="label"><span class="accent" style="background:var(--good)"></span>Blocked</div>
+      <div class="value" id="t-blocked">0</div>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <!-- Attack-type distribution -->
+    <section class="card">
+      <h2>Attack types <span class="count" id="dist-total"></span></h2>
+      <div class="bars" id="bars"></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--dos)"></span>DoS</span>
+        <span><span class="swatch" style="background:var(--ddos)"></span>DDoS</span>
+        <span><span class="swatch" style="background:var(--probe)"></span>Probe</span>
+        <span><span class="swatch" style="background:var(--benign)"></span>Benign</span>
+      </div>
+    </section>
+
+    <!-- Blocked IPs -->
+    <section class="card">
+      <h2>Blocked source IPs <span class="count" id="blk-count"></span></h2>
+      <div class="scroll"><table id="blk-table">
+        <thead><tr><th>Source IP</th><th>Type</th><th style="text-align:right">Hits</th></tr></thead>
+        <tbody id="blk-body"></tbody>
+      </table></div>
+      <div class="empty" id="blk-empty">No IPs blocked yet.</div>
+    </section>
+  </div>
+
+  <!-- Live feed -->
+  <section class="card" style="margin-top:16px">
+    <h2>Live event feed <span class="count" id="feed-count"></span></h2>
+    <div class="scroll"><table id="feed">
+      <thead><tr>
+        <th>Time</th><th>Source IP</th><th>Type</th>
+        <th style="text-align:right">Confidence</th><th>Action</th>
+      </tr></thead>
+      <tbody id="feed-body"></tbody>
+    </table></div>
+    <div class="empty" id="feed-empty">Waiting for events… start the detection pipeline to see traffic.</div>
+  </section>
+
+  <footer>
+    Polling <code>/events</code> every 2s · schema <code>shared/schema.py</code> · Bastion detection + dashboard
+  </footer>
+</div>
+
+<div id="tip"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var TYPES = {
+    dos:    { label: "DoS",    color: "var(--dos)" },
+    ddos:   { label: "DDoS",   color: "var(--ddos)" },
+    probe:  { label: "Probe",  color: "var(--probe)" },
+    benign: { label: "Benign", color: "var(--benign)" }
+  };
+  var ORDER = ["dos", "ddos", "probe", "benign"];
+
+  // --- theme toggle (per-viewer convenience; storage optional) ----------
+  var root = document.documentElement;
+  try {
+    var saved = localStorage.getItem("bastion-theme");
+    if (saved) root.setAttribute("data-theme", saved);
+  } catch (e) {}
+  document.getElementById("theme").addEventListener("click", function () {
+    var cur = root.getAttribute("data-theme");
+    var isDark = cur ? cur === "dark"
+      : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = isDark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("bastion-theme", next); } catch (e) {}
+  });
+
+  // --- tooltip ----------------------------------------------------------
+  var tip = document.getElementById("tip");
+  function showTip(html, x, y) {
+    tip.innerHTML = html; tip.style.opacity = "1";
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.min(x + 12, window.innerWidth - w - 8) + "px";
+    tip.style.top = Math.max(y - h - 10, 8) + "px";
+  }
+  function hideTip() { tip.style.opacity = "0"; }
+
+  // --- helpers ----------------------------------------------------------
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]; }); }
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return esc(iso);
+    return d.toLocaleTimeString([], { hour12: false }) +
+      "." + String(d.getMilliseconds()).padStart(3, "0");
+  }
+  var ICON = {
+    blocked: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 1.5 2.5 4v4c0 3 2.4 5.3 5.5 6.5C11.1 13.3 13.5 11 13.5 8V4L8 1.5Z"/><path d="M5.6 8.1 7.2 9.7l3.3-3.4"/></svg>',
+    logged:  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 8S3.8 3.5 8 3.5 14.5 8 14.5 8 12.2 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/></svg>'
+  };
+
+  // --- render -----------------------------------------------------------
+  function renderBars(counts, total) {
+    var max = Math.max(1, counts.dos, counts.ddos, counts.probe, counts.benign);
+    var html = ORDER.map(function (t) {
+      var n = counts[t] || 0;
+      var pct = total ? Math.round(n / total * 100) : 0;
+      var w = (n / max * 100).toFixed(1);
+      return '<div class="bar-row" data-t="' + t + '" data-n="' + n + '" data-pct="' + pct + '">' +
+        '<div class="name"><span class="swatch" style="background:' + TYPES[t].color + '"></span>' + TYPES[t].label + '</div>' +
+        '<div class="track"><div class="fill" style="width:' + w + '%;background:' + TYPES[t].color + '"></div></div>' +
+        '<div class="num">' + n + '</div></div>';
+    }).join("");
+    var box = document.getElementById("bars");
+    box.innerHTML = html;
+    document.getElementById("dist-total").textContent = total ? "· " + total + " total" : "";
+    Array.prototype.forEach.call(box.querySelectorAll(".bar-row"), function (row) {
+      row.addEventListener("mousemove", function (e) {
+        showTip("<b>" + TYPES[row.dataset.t].label + "</b><br>" +
+          row.dataset.n + " events · " + row.dataset.pct + "% of total", e.clientX, e.clientY);
+      });
+      row.addEventListener("mouseleave", hideTip);
+    });
+  }
+
+  function chip(t) {
+    return '<span class="chip"><span class="swatch" style="background:' +
+      TYPES[t].color + '"></span>' + TYPES[t].label + '</span>';
+  }
+  function statusCell(a) {
+    if (a === "blocked") return '<span class="status blocked">' + ICON.blocked + 'Blocked</span>';
+    if (a === "logged")  return '<span class="status logged">' + ICON.logged + 'Logged</span>';
+    return '<span class="status none">—</span>';
+  }
+  function confCell(c, t) {
+    var pct = Math.round(c * 100);
+    return '<div class="conf-wrap"><span class="meter"><i style="width:' + pct +
+      '%;background:' + TYPES[t].color + '"></i></span><span class="conf-num">' + pct + '%</span></div>';
+  }
+
+  function renderFeed(events) {
+    var body = document.getElementById("feed-body");
+    var empty = document.getElementById("feed-empty");
+    document.getElementById("feed-count").textContent = events.length ? "· " + events.length : "";
+    if (!events.length) { body.innerHTML = ""; empty.style.display = "block"; return; }
+    empty.style.display = "none";
+    var recent = events.slice(-60).reverse();
+    body.innerHTML = recent.map(function (e) {
+      var t = TYPES[e.attack_type] ? e.attack_type : "benign";
+      return '<tr data-type="' + t + '">' +
+        '<td class="time">' + fmtTime(e.timestamp) + '</td>' +
+        '<td class="ip">' + esc(e.src_ip) + '</td>' +
+        '<td>' + chip(t) + '</td>' +
+        '<td class="conf">' + confCell(+e.confidence || 0, t) + '</td>' +
+        '<td>' + statusCell(e.action_taken) + '</td></tr>';
+    }).join("");
+  }
+
+  function renderBlocked(events) {
+    var map = {};
+    events.forEach(function (e) {
+      if (e.action_taken !== "blocked") return;
+      var k = e.src_ip;
+      if (!map[k]) map[k] = { ip: k, type: e.attack_type, hits: 0 };
+      map[k].hits++; map[k].type = e.attack_type;
+    });
+    var rows = Object.keys(map).map(function (k) { return map[k]; })
+      .sort(function (a, b) { return b.hits - a.hits; });
+    var body = document.getElementById("blk-body");
+    var empty = document.getElementById("blk-empty");
+    document.getElementById("blk-count").textContent = rows.length ? "· " + rows.length : "";
+    if (!rows.length) { body.innerHTML = ""; empty.style.display = "block"; return; }
+    empty.style.display = "none";
+    body.innerHTML = rows.map(function (r) {
+      var t = TYPES[r.type] ? r.type : "benign";
+      return '<tr data-type="' + t + '"><td class="ip">' + esc(r.ip) + '</td>' +
+        '<td>' + chip(t) + '</td><td style="text-align:right;font-variant-numeric:tabular-nums">' +
+        r.hits + '</td></tr>';
+    }).join("");
+  }
+
+  function renderTiles(events, counts) {
+    var total = events.length;
+    var threats = total - (counts.benign || 0);
+    var ips = {}, blocked = 0;
+    events.forEach(function (e) {
+      if (e.attack_type !== "benign") ips[e.src_ip] = 1;
+      if (e.action_taken === "blocked") blocked++;
+    });
+    document.getElementById("t-total").textContent = total;
+    document.getElementById("t-threats").firstChild.nodeValue =
+      threats + " ";
+    document.getElementById("t-threats-pct").textContent =
+      total ? Math.round(threats / total * 100) + "%" : "";
+    document.getElementById("t-ips").textContent = Object.keys(ips).length;
+    document.getElementById("t-blocked").textContent = blocked;
+  }
+
+  function update(events) {
+    var counts = { dos: 0, ddos: 0, probe: 0, benign: 0 };
+    events.forEach(function (e) {
+      if (counts[e.attack_type] === undefined) counts[e.attack_type] = 0;
+      counts[e.attack_type]++;
+    });
+    renderTiles(events, counts);
+    renderBars(counts, events.length);
+    renderFeed(events);
+    renderBlocked(events);
+  }
+
+  // --- polling ----------------------------------------------------------
+  var live = document.getElementById("live");
+  var liveTxt = document.getElementById("live-txt");
+  function setLive(ok) {
+    live.className = "live " + (ok ? "on" : "off");
+    liveTxt.textContent = ok ? "Live · " + new Date().toLocaleTimeString([], { hour12: false })
+                              : "Backend offline — retrying";
+  }
+
+  function poll() {
+    fetch("/events", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) { update(d.events || []); setLive(true); })
+      .catch(function () { setLive(false); });
+  }
+  poll();
+  setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>
