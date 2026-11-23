@@ -60,19 +60,31 @@ def classify_row(f: dict) -> tuple[AttackType, float]:
 
 
 def _rule_based(f: dict) -> tuple[AttackType, float]:
-    """Rule-based stand-in used until the RF model is trained."""
-    syn = float(f.get("syn_ratio", 0.0))
-    udp = float(f.get("udp_ratio", 0.0))
-    pps = float(f.get("pkts_per_s", 0.0))
-    duration = float(f.get("duration_s", 0.0))
-    iat = float(f.get("mean_iat_ms", 0.0))
+    """Rule-based stand-in used only when the RF model is absent/unloadable.
 
-    if syn > 0.6 and pps > 500:
-        return AttackType.SYN_FLOOD, _conf(syn)
-    if udp > 0.6 and pps > 500:
-        return AttackType.UDP_FLOOD, _conf(udp)
-    if duration > 30 and pps < 50 and iat > 400:
-        return AttackType.SLOWLORIS, _conf(min(1.0, iat / 5000 + 0.5))
+    Coarse heuristics over the shared FEATURE_COLUMNS, mapped to the InSDN
+    taxonomy {benign, dos, ddos, probe}. The trained RF (rf_model.joblib) is the
+    real classifier; this fallback just keeps the pipeline running and emitting
+    contract-valid events when no model is committed.
+
+      * probe  — horizontal scan: many distinct destination ports, small/sparse
+                 packets (reconnaissance, not a volumetric flood).
+      * ddos   — very high packet rate, i.e. a sustained volumetric flood.
+      * dos    — elevated but lower-rate flood from a single flow.
+    """
+    pps = float(f.get("pkts_per_s", 0.0))
+    ports = float(f.get("unique_dst_ports", 1.0))
+    pkts = float(f.get("pkt_count", 0.0))
+    size = float(f.get("mean_pkt_size", 0.0))
+
+    # Port scanning / probing: fanned out across many destination ports.
+    if ports > 10 and size < 300:
+        return AttackType.PROBE, _conf(min(0.95, ports / 50 + 0.5))
+    # Volumetric flood — split dos vs ddos by rate/volume magnitude.
+    if pps > 2000 or pkts > 20000:
+        return AttackType.DDOS, _conf(min(0.95, pps / 5000 + 0.5))
+    if pps > 500:
+        return AttackType.DOS, _conf(min(0.9, pps / 2000 + 0.5))
     return AttackType.BENIGN, _conf(0.7)
 
 

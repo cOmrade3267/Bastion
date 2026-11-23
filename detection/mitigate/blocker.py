@@ -338,16 +338,16 @@ if __name__ == "__main__":
           f"(nft/iptables detected; staying in PLAN mode — nothing is touched)\n")
 
     b = Blocker(enabled=True, enforce=False, threshold=0.8, block_seconds=2)
-    # A high-confidence SYN flood -> BLOCKED (planned)
-    print("1)", b.consider(AttackType.SYN_FLOOD, 0.97, "10.0.0.5"))
+    # A high-confidence DDoS flood -> BLOCKED (planned)
+    print("1)", b.consider(AttackType.DDOS, 0.97, "10.0.0.5"))
     # Same IP again -> refresh, still BLOCKED
-    print("2)", b.consider(AttackType.UDP_FLOOD, 0.91, "10.0.0.5"))
+    print("2)", b.consider(AttackType.DOS, 0.91, "10.0.0.5"))
     # Low confidence -> LOGGED, not blocked
-    print("3)", b.consider(AttackType.SLOWLORIS, 0.55, "10.0.0.6"))
+    print("3)", b.consider(AttackType.PROBE, 0.55, "10.0.0.6"))
     # Benign -> NONE
     print("4)", b.consider(AttackType.BENIGN, 0.99, "10.0.0.8"))
     # Loopback attack (spoofed/misclassified) -> refused, LOGGED
-    print("5)", b.consider(AttackType.SYN_FLOOD, 0.99, "127.0.0.1"))
+    print("5)", b.consider(AttackType.DDOS, 0.99, "127.0.0.1"))
 
     print("\nactive blocks (ip -> seconds left):", b.active())
     print("waiting for timeout + sweep...")
