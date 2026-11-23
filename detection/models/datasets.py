@@ -27,7 +27,9 @@ sys.path.insert(0, str(HERE.parent))  # so `features` is importable
 
 from features.extract import synthetic_flows, FEATURE_COLUMNS  # noqa: E402
 
-CLASSES = ["syn_flood", "udp_flood", "slowloris", "benign"]
+# Synthetic generator classes — the InSDN taxonomy the live model uses
+# (shared/schema.py AttackType). Kept in sync with features.extract profiles.
+CLASSES = ["benign", "dos", "ddos", "probe"]
 
 
 # --------------------------------------------------------------------------- #
@@ -177,7 +179,14 @@ def _load_cicflowmeter(paths, label_norm, tag: str) -> pd.DataFrame:
 
 
 def load_cicddos2019(paths) -> pd.DataFrame:
-    """Load CICDDoS2019 CSVs -> FEATURE_COLUMNS + 4 flood-type labels."""
+    """Load CICDDoS2019 CSVs -> FEATURE_COLUMNS + 4 flood-type labels.
+
+    NOTE: maps to the RETIRED {syn_flood,udp_flood,slowloris,benign} taxonomy.
+    The project pivoted to InSDN (#35) and the live contract (shared/schema.py
+    AttackType) now carries {benign,dos,ddos,probe}, so a model trained on this
+    loader's labels is NOT contract-compatible. Kept for reference/reproduction
+    only; use load_insdn() for the current pipeline.
+    """
     return _load_cicflowmeter(paths, _norm_label, "cicddos")
 
 
