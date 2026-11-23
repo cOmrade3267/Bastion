@@ -171,9 +171,16 @@ def main():
               f"predict them): {missing}. CICDDoS2019 has no slowloris — add "
               f"CIC-IDS2017 DoS CSVs to the --train-csv glob to cover it.")
 
+    cv_summary = None
     if args.cv:
         cv = cross_val_score(build_model(args.seed), X_tr, y_tr, cv=5,
                              scoring="f1_macro")
+        cv_summary = {
+            "folds": 5,
+            "macro_f1_mean": float(cv.mean()),
+            "macro_f1_std": float(cv.std()),
+            "scores": [float(s) for s in cv],
+        }
         print(f"\n5-fold CV macro-F1 (train set): {cv.mean():.4f} ± {cv.std():.4f}")
 
     # --- persist ---
@@ -197,6 +204,7 @@ def main():
         "class_counts": {k: int(v) for k, v in pd.Series(y_all).value_counts().items()},
         "accuracy": report["accuracy"],
         "macro_f1": macro_f1,
+        "cross_validation": cv_summary,  # null unless --cv was passed
         "per_class": {c: report[c] for c in labels},
         "feature_importances": importances,
         "trained_at": now,
