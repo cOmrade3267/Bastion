@@ -35,16 +35,22 @@ FEATURE_COLUMNS: list[str] = [
 ]
 
 # How the synthetic generator shapes each class. Rough, plausible distributions
-# so the placeholder classifier has something separable to work on.
+# in the InSDN taxonomy {benign, dos, ddos, probe} — the same classes the live
+# model emits (shared/schema.py AttackType) — so a model trained on synthetic
+# flows classifies into valid contract classes. Shapes line up with the
+# rule-based fallback heuristics in models/classify.py:
+#   probe -> many unique dst ports + small packets (scan)
+#   ddos  -> very high packet rate, small packets (volumetric flood)
+#   dos   -> elevated single-flow rate
 _CLASS_PROFILES = {
-    "syn_flood": dict(duration=(2, 8), pps=(2000, 8000), syn=(0.85, 0.99),
-                      udp=(0.0, 0.05), ports=(200, 1000), iat=(0.1, 0.5), size=(40, 64)),
-    "udp_flood": dict(duration=(2, 8), pps=(3000, 9000), syn=(0.0, 0.05),
-                      udp=(0.85, 0.99), ports=(1, 20), iat=(0.1, 0.4), size=(512, 1400)),
-    "slowloris": dict(duration=(60, 300), pps=(1, 20), syn=(0.2, 0.5),
-                      udp=(0.0, 0.05), ports=(1, 5), iat=(500, 5000), size=(100, 300)),
-    "benign":    dict(duration=(1, 120), pps=(5, 200), syn=(0.05, 0.3),
-                      udp=(0.1, 0.4), ports=(1, 40), iat=(5, 200), size=(200, 1200)),
+    "benign": dict(duration=(1, 120), pps=(5, 200), syn=(0.05, 0.3),
+                   udp=(0.1, 0.4), ports=(1, 40), iat=(5, 200), size=(200, 1200)),
+    "dos":    dict(duration=(2, 12), pps=(600, 1800), syn=(0.5, 0.9),
+                   udp=(0.0, 0.2), ports=(1, 10), iat=(0.3, 2.0), size=(120, 700)),
+    "ddos":   dict(duration=(2, 15), pps=(2500, 9000), syn=(0.4, 0.95),
+                   udp=(0.05, 0.5), ports=(50, 500), iat=(0.05, 0.4), size=(40, 220)),
+    "probe":  dict(duration=(5, 90), pps=(5, 120), syn=(0.2, 0.6),
+                   udp=(0.0, 0.2), ports=(20, 300), iat=(20, 800), size=(40, 250)),
 }
 
 
